@@ -138,14 +138,6 @@ class Player:
         self.pile = PlayerPile()
         self.hand = PlayerHand()
 
-    def play_card(self, card: Card):
-        self.pile.add_card(card)
-
-        self.game.handle_played_card(self, card)
-
-    def legal_moves(self):
-        pass
-
     def legal_cards_to_play(self):
         cards_list = [card for card in self.hand]
 
@@ -169,26 +161,32 @@ class Player:
     def __eq__(self, other):
         return isinstance(other, Player) and self.value == other.value
 
+    # Actions
+    def play_card(self, card: Card):
+        self.pile.add_card(card)
+
+        return self.game.handle_played_card(self, card)
+
     def toep(self):
-        self.game.handle_toep(self)
+        return self.game.handle_toep(self)
 
     def fold(self):
-        self.game.handle_fold(self)
+        return self.game.handle_fold(self)
 
     def go_on(self):
-        self.game.handle_go()
+        return self.game.handle_go()
 
     def look_at_called_vuile_was(self):
-        self.game.handle_looked_vuile_was(self)
+        return self.game.handle_looked_vuile_was(self)
 
     def belive_vuile_was(self):
-        self.game.handle_believed_vuile_was(self)
+        return self.game.handle_believed_vuile_was(self)
 
     def call_vuile_was(self):
-        self.game.handle_called_vuile_was(self)
+        return self.game.handle_called_vuile_was(self)
 
     def dont_call_vuile_was(self):
-        self.game.handle_not_called_vuile_was(self)
+        return self.game.handle_not_called_vuile_was(self)
 
 
 class ToepGame:
