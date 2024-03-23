@@ -19,23 +19,19 @@ class ToepObservationSpace:
 
         # Define subspaces for different elements of the observation
         self.player_hands_space = MultiDiscrete(
-            [highest_number + 1]
-            * self.num_cards_per_player
-            * self.num_players,
+            [highest_number] * self.num_cards_per_player * self.num_players,
             dtype=np.int32,
         )
         self.player_piles_space = MultiDiscrete(
-            [highest_number + 1]
-            * self.num_cards_per_player
-            * self.num_players,
+            [highest_number] * self.num_cards_per_player * self.num_players,
             dtype=np.int32,
         )
         self.player_scores_space = MultiDiscrete(
-            [max_score + 1] * num_players, dtype=np.int32
+            [max_score] * num_players, dtype=np.int32
         )
-        self.turn_number_space = Discrete(num_players + 1)
-        self.sub_round_number_space = Discrete(self.num_cards_per_player + 1)
-        self.action_type_space = Discrete(5)
+        self.turn_number_space = Discrete(num_players)
+        self.sub_round_number_space = Discrete(self.num_cards_per_player)
+        self.action_type_space = Discrete(4)
 
         # Combine all subspaces into a dictionary space
         self.observation_space = Dict(
