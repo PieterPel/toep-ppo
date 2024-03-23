@@ -3,6 +3,7 @@ import itertools
 import random
 import math
 import copy
+import logging
 
 from toeppo.errors import NotEnoughPlayersError, TooManyPlayersError
 
@@ -33,6 +34,7 @@ class ActionType(Enum):
     GO_OR_FOLD = auto()
     CHECK_OR_TRUST = auto()
     CALL_VUILE_WAS = auto()
+    LOST = auto()
 
 
 class Card:
@@ -54,6 +56,9 @@ class Card:
     @property
     def value(self):
         return self.rank_to_value[self.rank]
+
+    def __eq__(self, other):
+        return self.suit == other.suit and self.rank == other.rank
 
 
 class CardCollection:
@@ -83,7 +88,7 @@ class Deck(CardCollection):
         suits = Suit.__members__.values()
 
         self.cards = [
-            Card(rank, suit) for rank, suit in itertools.product(ranks, suits)
+            Card(suit, rank) for suit, rank in itertools.product(suits, ranks)
         ]
 
     def draw_card(self):
@@ -159,7 +164,12 @@ class Player:
         return hash(self.name)
 
     def __eq__(self, other):
-        return isinstance(other, Player) and self.value == other.value
+        return (
+            isinstance(other, Player) and self.name == other.name
+        )  # TODO: should probably be able to have instances with the same name not be equal
+
+    def __str__(self):
+        return self.name
 
     # Actions
     def play_card(self, card: Card):
@@ -193,20 +203,24 @@ class ToepGame:
     MAX_SCORE = 15
 
     def __init__(self, n_players: int):
-        self.deck = Deck.shuffled_deck()
+        self.logger = logging.getLogger(__name__)
+
+        self.deck = Deck()
 
         if n_players < 2:
             raise NotEnoughPlayersError()
         elif n_players > math.floor(len(self.deck) / CARDS_PER_PLAYER):
             raise TooManyPlayersError()
 
-        self.players = [Player(str(i)) for i in range(1, n_players + 1)]
+        self.players = [
+            Player(f"player_{str(i)}") for i in range(1, n_players + 1)
+        ]
         self.set_players_game()
 
         self.dealing_player = self.players[0]
         self.active_player = None
-        self.turn = None
-        self.sub_round = None
+        self.turn = 0
+        self.sub_round = 0
         self.leading_suit = None
         self.stake = 0
         self.called_vuile_was = None
@@ -218,10 +232,15 @@ class ToepGame:
             player.enter_game(self)
 
     def start_round(self) -> tuple[Player, ActionType]:
-        if self.ended_game:
-            # TODO: implement
-            pass
+        self.logger.info("Starting a round")
 
+        if self.ended_game:
+            return (
+                self.losing_players,
+                ActionType.LOST,
+            )  # TODO: this returns a list now, not the best code since all other functions return a single player. Maybe just check in the environment for a lost game?
+
+        self.deck.shuffle()
         self.distribute_cards()
         self.sub_round = 0
         self.stake = 1
@@ -236,12 +255,16 @@ class ToepGame:
             return self.start_sub_round()
 
     def start_vuile_was_round(self) -> tuple[Player, ActionType]:
+        self.logger.info("Starting a vuile was round")
+
         return self.active_player, ActionType.CALL_VUILE_WAS
 
     def start_sub_round(self) -> tuple[Player, ActionType]:
-        self.last_player_of_sub_round = self.last_player_dict(
+        self.logger.info("Starting a sub round")
+
+        self.last_player_of_sub_round = self.last_player_dict[
             self.active_player
-        )
+        ]
         self.sub_round += 1
         self.turn = 1
         self.leading_suit = None
@@ -266,6 +289,8 @@ class ToepGame:
         return best_player, best_card
 
     def end_sub_round(self) -> tuple[Player, ActionType]:
+        self.logger.info("Ending a sub round")
+
         self.winning_player, self.winning_card = (
             self.determine_sub_round_winner()
         )
@@ -277,13 +302,14 @@ class ToepGame:
             return self.start_sub_round()
 
     def end_round(self) -> tuple[Player, ActionType]:
+        self.logger.info("Ending a round")
+
         if self.winning_card.rank == Rank.JACK:
             self.stake *= 2
 
         self.give_scores_at_end_of_round()
 
         self.reset_players()
-        self.deck = Deck.shuffled_deck()
 
         return self.start_round()
 
@@ -306,6 +332,8 @@ class ToepGame:
     def handle_looked_vuile_was(
         self, player: Player
     ) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} looked at the vuile was")
+
         self.players_that_looked.append(player)
 
         if player == self.last_player_to_look_or_believe:
@@ -316,6 +344,8 @@ class ToepGame:
     def handle_called_vuile_was(
         self, player: Player
     ) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} called a vuile was")
+
         self.called_vuile_was = player
         self.last_player_to_look_or_believe = self.last_player_dict[player]
 
@@ -324,6 +354,8 @@ class ToepGame:
     def handle_not_called_vuile_was(
         self, player: Player
     ) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} did not call a vuile was")
+
         if player == self.last_player_dict[self.active_player]:
             self.start_sub_round()
         else:
@@ -332,6 +364,8 @@ class ToepGame:
     def handle_believed_vuile_was(
         self, player: Player
     ) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} believed the vuile was")
+
         if player == self.last_player_to_look_or_believe:
             self.handle_vuile_was_end(player)
 
@@ -355,6 +389,8 @@ class ToepGame:
     def handle_played_card(
         self, player: Player, card: Card
     ) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} played a {card}")
+
         self.active_player = self.next_player_dict[self]
 
         if self.turn == 1:
@@ -370,6 +406,8 @@ class ToepGame:
         return self.next_player_dict[player], ActionType.PLAY_CARD
 
     def handle_fold(self, player: Player) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} folded")
+
         player.score += self.stake
 
         if self.last_player_to_toep is None:
@@ -388,12 +426,16 @@ class ToepGame:
             return self.next_player_dict[player], ActionType.GO_OR_FOLD
 
     def handle_go(self, player: Player) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} goes with the toep")
+
         if player == self.last_player_dict[self.active_player]:
             return self.handle_ended_go_or_fold_round()
 
         return self.next_player_dict[player], ActionType.GO_OR_FOLD
 
     def handle_toep(self, player: Player) -> tuple[Player, ActionType]:
+        self.logger.info(f"{player} toeps")
+
         return self.next_player_dict[player], ActionType.GO_OR_FOLD
 
     def handle_ended_go_or_fold_round(self) -> tuple[Player, ActionType]:
@@ -407,19 +449,19 @@ class ToepGame:
 
     def update_players_dict(self):
         self.next_player_dict = {
-            player: self.players[index + 1]
+            player: self.alive_players[index + 1]
             for index, player in enumerate(self.alive_players[:-1])
         }
         self.next_player_dict[self.alive_players[-1]] = self.alive_players[0]
 
         self.last_player_dict = {
-            player: self.players[index - 1]
+            player: self.alive_players[index - 1]
             for index, player in enumerate(self.alive_players[1:])
         }
         self.last_player_dict[self.alive_players[0]] = self.alive_players[-1]
 
     @property
-    def max_score(self):
+    def max_score(self) -> int:
         highest_score = self.players[0].score
 
         for player in self.players[1:]:
@@ -429,14 +471,24 @@ class ToepGame:
         return highest_score
 
     @property
-    def ended_game(self):
+    def losing_players(self) -> list[Player]:
+        players_above_max_score = []
+
+        for player in self.players:
+            if player.score >= self.MAX_SCORE:
+                players_above_max_score.append(player)
+
+        return player
+
+    @property
+    def ended_game(self) -> bool:
         if self.max_score >= self.MAX_SCORE:
             return True
         else:
             return False
 
     @property
-    def armoe(self):
+    def armoe(self) -> bool:
         if self.max_score == self.MAX_SCORE - 1:
             return True
         else:
