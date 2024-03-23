@@ -1,8 +1,9 @@
-import gym
-from gym.spaces import Dict, Discrete, MultiDiscrete
+import gymnasium as gym
+from gymnasium.spaces import Dict, Discrete, MultiDiscrete
+import numpy as np
 
 
-class ToepObservationSpace(gym.Space):
+class ToepObservationSpace:
     def __init__(
         self,
         num_players,
@@ -13,20 +14,28 @@ class ToepObservationSpace(gym.Space):
         self.num_players = num_players
         self.max_cards_per_pile = num_cards_per_player
         self.card_to_number_dict = card_to_number_mapping
+        self.num_cards_per_player = num_cards_per_player
         highest_number = max(self.card_to_number_dict.values())
 
         # Define subspaces for different elements of the observation
         self.player_hands_space = MultiDiscrete(
-            [highest_number] * num_cards_per_player
+            [highest_number + 1]
+            * self.num_cards_per_player
+            * self.num_players,
+            dtype=np.int32,
         )
         self.player_piles_space = MultiDiscrete(
-            [highest_number] * num_cards_per_player
+            [highest_number + 1]
+            * self.num_cards_per_player
+            * self.num_players,
+            dtype=np.int32,
         )
-        self.player_scores_space = (
-            MultiDiscrete([max_score] * num_players),
-        )  # TODO: maybe change 15 to some kind of variable
-        self.turn_number_space = Discrete(num_players)
-        self.sub_round_number_space = Discrete(num_cards_per_player)
+        self.player_scores_space = MultiDiscrete(
+            [max_score + 1] * num_players, dtype=np.int32
+        )
+        self.turn_number_space = Discrete(num_players + 1)
+        self.sub_round_number_space = Discrete(self.num_cards_per_player + 1)
+        self.action_type_space = Discrete(5)
 
         # Combine all subspaces into a dictionary space
         self.observation_space = Dict(
@@ -36,44 +45,56 @@ class ToepObservationSpace(gym.Space):
                 "player_scores": self.player_scores_space,
                 "turn_number": self.turn_number_space,
                 "sub_round_number": self.sub_round_number_space,
+                "action_type": self.action_type_space,
             }
         )
 
-    def sample(self):
-        # Sample a random observation from each subspace
+    def empty_space(self):
+        # Create empty observation space for player hands and piles
+        player_hands_empty = np.zeros(
+            (self.num_players, self.num_cards_per_player * self.num_players),
+            dtype=int,
+        )
+        player_piles_empty = np.zeros(
+            (self.num_players, self.num_cards_per_player * self.num_players),
+            dtype=int,
+        )
+
+        # Create empty observation space for player scores
+        player_scores_empty = np.zeros((self.num_players,), dtype=int)
+
+        # Set other values to zero
+        turn_number_empty = 0
+        sub_round_number_empty = 0
+        action_type = 0
+
         return {
-            "player_hands": self.player_hands_space.sample(),
-            "player_piles": self.player_piles_space.sample(),
-            "player_scores": [
-                self.player_scores_space.sample()
-                for _ in range(self.num_players)
-            ],
-            "turn_number": self.turn_number_space.sample(),
-            "sub_round_number": self.sub_round_number_space.sample(),
+            "player_hands": player_hands_empty,
+            "player_piles": player_piles_empty,
+            "player_scores": player_scores_empty,
+            "turn_number": turn_number_empty,
+            "sub_round_number": sub_round_number_empty,
+            "action_type": action_type,
         }
 
-    def contains(self, x):
-        # Check if x is a valid observation
-        if not isinstance(x, dict):
-            return False
-        if set(x.keys()) != set(
-            [
-                "player_hands",
-                "player_piles",
-                "player_scores",
-                "turn_number",
-                "sub_round_number",
-            ]
-        ):
-            return False
-        if not self.player_hands_space.contains(x["player_hands"]):
-            return False
-        if not self.player_piles_space.contains(x["player_piles"]):
-            return False
-        if not self.player_scores_space.contains(x["player_scores"]):
-            return False
-        if not self.turn_number_space.contains(x["turn_number"]):
-            return False
-        if not self.sub_round_number_space.contains(x["sub_round_number"]):
-            return False
-        return True
+    @property
+    def shape(self):
+        # Calculate the shape of each subspace
+        player_hands_shape = self.player_hands_space.shape
+        player_piles_shape = self.player_piles_space.shape
+        player_scores_shape = self.player_scores_space.shape
+        turn_number_shape = self.turn_number_space.shape
+        sub_round_number_shape = self.sub_round_number_space.shape
+        action_type_shape = self.action_type_space.shape
+
+        # Calculate the total size of the observation space
+        total_size = int(
+            np.prod(player_hands_shape)
+            + np.prod(player_piles_shape)
+            + np.prod(player_scores_shape)
+            + np.prod(turn_number_shape)
+            + np.prod(sub_round_number_shape)
+            + np.prod(action_type_shape)
+        )
+
+        return (total_size,)
