@@ -1,86 +1,144 @@
-#################################################
-# adapted from https://github.com/ray-project/ray/blob/5ec63ccc5f351f143bd325e764d1f2a523023ca9/rllib/examples/models/action_mask_model.py
+"""Uses Ray's RLlib to train agents to play Leduc Holdem.
 
-from gym.spaces import Dict
+Author: Rohan (https://github.com/Rohan138)
+"""
+
+from toeppo.environment.toep_env import ToepEnv
+
+import logging
+import os
+
+import ray
+from gymnasium.spaces import Box, Discrete
+from ray import tune
+from ray.rllib.algorithms.dqn import DQNConfig
+from ray.rllib.algorithms.dqn.dqn_torch_model import DQNTorchModel
+from ray.rllib.env import PettingZooEnv
+from ray.rllib.models import ModelCatalog
 from ray.rllib.models.torch.fcnet import FullyConnectedNetwork as TorchFC
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.framework import try_import_tf, try_import_torch
-from ray.rllib.utils.torch_utils import FLOAT_MIN
+from ray.rllib.utils.framework import try_import_torch
+from ray.rllib.utils.torch_utils import FLOAT_MAX
+from ray.tune.registry import register_env
 
-tf1, tf, tfv = try_import_tf()
+from pettingzoo.classic import leduc_holdem_v4
+
 torch, nn = try_import_torch()
+logging.basicConfig(level=logging.DEBUG, filename="test.log")
 
 
-class TorchActionMaskModel(TorchModelV2, nn.Module):
-    """PyTorch version
-
-
-    Model that handles simple discrete action masking.
-    This assumes the outputs are logits for a single Categorical action dist.
-    Getting this to work with a more complex output (e.g., if the action space
-    is a tuple of several distributions) is also possible but left as an
-    exercise to the reader.
-    """
+class TorchMaskedActions(DQNTorchModel):
+    """PyTorch version of above ParametricActionsModel."""
 
     def __init__(
         self,
-        obs_space,
-        action_space,
+        obs_space: Box,
+        action_space: Discrete,
         num_outputs,
         model_config,
         name,
-        **kwargs,
+        **kw,
     ):
-        orig_space = getattr(obs_space, "original_space", obs_space)
-        assert (
-            isinstance(orig_space, Dict)
-            and "action_mask" in orig_space.spaces
-            and "observations" in orig_space.spaces
-        )
-
-        TorchModelV2.__init__(
+        DQNTorchModel.__init__(
             self,
             obs_space,
             action_space,
             num_outputs,
             model_config,
             name,
-            **kwargs,
+            **kw,
         )
-        nn.Module.__init__(self)
 
-        self.internal_model = TorchFC(
-            orig_space["observations"],
+        obs_len = obs_space.shape[0] - action_space.n
+
+        orig_obs_space = Box(
+            shape=(obs_len,),
+            low=obs_space.low[:obs_len],
+            high=obs_space.high[:obs_len],
+        )
+        self.action_embed_model = TorchFC(
+            orig_obs_space,
             action_space,
-            num_outputs,
+            action_space.n,
             model_config,
-            name + "_internal",
+            name + "_action_embed",
         )
-
-        # disable action masking --> will likely lead to invalid actions
-        self.no_masking = False
-        if "no_masking" in model_config["custom_model_config"]:
-            self.no_masking = model_config["custom_model_config"]["no_masking"]
 
     def forward(self, input_dict, state, seq_lens):
         # Extract the available actions tensor from the observation.
         action_mask = input_dict["obs"]["action_mask"]
 
-        # Compute the unmasked logits.
-        logits, _ = self.internal_model(
-            {"obs": input_dict["obs"]["observations"]}
+        # Compute the predicted action embedding
+        action_logits, _ = self.action_embed_model(
+            {"obs": input_dict["obs"]["observation"]}
         )
+        # turns probit action mask into logit action mask
+        inf_mask = torch.clamp(torch.log(action_mask), -1e10, FLOAT_MAX)
 
-        # If action masking is disabled, directly return unmasked logits
-        if self.no_masking:
-            return logits, state
-
-        # Convert action_mask into a [0.0 || -inf]-type mask.
-        inf_mask = torch.clamp(torch.log(action_mask), min=FLOAT_MIN)
-        masked_logits = logits + inf_mask
-
-        # Return masked logits.
-        return masked_logits, state
+        return action_logits + inf_mask, state
 
     def value_function(self):
-        return self.internal_model.value_function()
+        return self.action_embed_model.value_function()
+
+
+if __name__ == "__main__":
+    ray.init()
+
+    alg_name = "DQN"
+    ModelCatalog.register_custom_model("toep_model", TorchMaskedActions)
+    # function that outputs the environment you wish to register.
+
+    def env_creator():
+        env = ToepEnv.env(n_players=4)
+        return env
+
+    env_name = "toep_model"
+    register_env(env_name, lambda config: PettingZooEnv(env_creator()))
+
+    test_env = PettingZooEnv(env_creator())
+    obs_space = test_env.observation_space
+    act_space = test_env.action_space
+
+    config = (
+        DQNConfig()
+        .environment(env=env_name)
+        .rollouts(num_rollout_workers=1, rollout_fragment_length=30)
+        .training(
+            train_batch_size=200,
+            hiddens=[],
+            dueling=False,
+            model={"custom_model": "toep_model"},
+        )
+        .multi_agent(
+            policies={
+                "player_1": (None, obs_space, act_space, {}),
+                "player_2": (None, obs_space, act_space, {}),
+                "player_3": (None, obs_space, act_space, {}),
+                "player_4": (None, obs_space, act_space, {}),
+            },
+            policy_mapping_fn=(lambda agent_id, *args, **kwargs: agent_id),
+        )
+        .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
+        .debugging(
+            log_level="DEBUG"
+        )  # TODO: change to ERROR to match pistonball example
+        .framework(framework="torch")
+        .exploration(
+            exploration_config={
+                # The Exploration class to use.
+                "type": "EpsilonGreedy",
+                # Config for the Exploration class' constructor:
+                "initial_epsilon": 0.1,
+                "final_epsilon": 0.0,
+                "epsilon_timesteps": 10,  # Timesteps over which to anneal epsilon.
+            }
+        )
+        .environment(disable_env_checking=True)
+    )
+
+    tune.run(
+        alg_name,
+        name="DQN",
+        stop={"timesteps_total": 500 if not os.environ.get("CI") else 50000},
+        checkpoint_freq=10,
+        config=config.to_dict(),
+    )
