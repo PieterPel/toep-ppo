@@ -106,14 +106,17 @@ class ToepEnv(AECEnv):
         )
 
         # Start the first round
-        first_player, first_action = self.game.start_round()
+        first_player, self.action_type = self.game.start_round()
 
-        self.observations = self.get_observations(first_action)
-        self.infos = self.get_infos(first_player, first_action)
+        self.observations = self.get_observations(self.action_type)
+        self.infos = self.get_infos(first_player, self.action_type)
 
         self.agent_selection = self.player_to_agent_dict[first_player]
 
-        self.logger.info(f"First action: {first_action}")
+        self.logger.info(f"First action: {self.action_type}")
+
+        first_mask = self.observations[self.agent_selection]["action_mask"]
+        self.logger.info(f"Mask is: {first_mask}")
 
         return self.observations, self.infos
 
@@ -123,6 +126,11 @@ class ToepEnv(AECEnv):
         agent = self.agent_selection
 
         self.logger.info(f"Taking a step: action {action} of {agent}")
+        print(f"Taking a step: action {action} ({self.action_type})of {agent}")
+        mask = self.observations[agent]["action_mask"]
+        self.logger.info(f"Mask was: {mask}")
+        print(f"Mask was: {mask}")
+        print(f"Scores: {self.game.scores}")
 
         # NOTE: I do not understand this
         # the agent which stepped last had its _cumulative_rewards accounted for
@@ -161,14 +169,7 @@ class ToepEnv(AECEnv):
                 player, self.action_type, extra_mask=action
             )
 
-            # Try it again
-            # return (
-            #     self.observations,
-            #     self.rewards,
-            #     self.truncations,
-            #     self.terminations,
-            #     self.infos,
-            # )
+            return
 
         # Convert action to action for player
         player = self.agent_to_player_dict[agent]
@@ -178,22 +179,6 @@ class ToepEnv(AECEnv):
         next_player, self.action_type = self.handle_action_for_player(
             player, action
         )
-
-        # if self.game.ended_game:
-        #     self.rewards = self.get_rewards()
-
-        # # NOTE this is very ugly but it works
-        # for player in self.game.losing_players:
-        #     agent_ = self.player_to_agent_dict[player]
-        #     self.rewards[agent_] = (
-        #         -1
-        #         * (player.score - self.game.MAX_SCORE + 1)
-        #         * self.losing_penalty_multiplier
-        #     )
-
-        # self.terminations = {agent: True for agent in self.agents}
-
-        # else:
 
         # Select next agent
         self.agent_selection = self.player_to_agent_dict[next_player]
@@ -224,14 +209,6 @@ class ToepEnv(AECEnv):
             self.render()
 
         self.logger.info(f"Next action: {self.action_type}")
-
-        # return (
-        #     self.observations,
-        #     self.rewards,
-        #     self.truncations,
-        #     self.terminations,
-        #     self.infos,
-        # )
 
     def get_observations(self, action_type: ActionType):
         # NOTE can probably be made more efficient by saving the last space and adjust it
@@ -288,13 +265,21 @@ class ToepEnv(AECEnv):
                 hand_space, dtype=np.int32
             )
 
-            agent_observation = flatten(
-                self.observation_space_base.observation_space_dict,
-                agent_observation,
-            )
+            try:
+                agent_observation = flatten(
+                    self.observation_space_base.observation_space_dict,
+                    agent_observation,
+                )
+                # print("Flattened succesful")
+            except IndexError:
+                # print("Could not flatten the dict")
+                raise IndexError()
 
             # Update the dictionary
-            observations_dict[agent] = agent_observation
+            observations_dict[agent] = {
+                "observation": agent_observation,
+                "action_mask": self.get_mask(agent, action_type),
+            }
 
         return observations_dict
 
@@ -382,9 +367,6 @@ class ToepEnv(AECEnv):
 
                 for number in legal_numbers:
                     mask[number] = 1
-
-                # TODO: remove!!!!
-                # mask[0] = 1
 
         if extra_mask is not None:
             mask[extra_mask] = 0
