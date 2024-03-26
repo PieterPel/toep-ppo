@@ -423,6 +423,8 @@ class ToepGame:
         self, last_player: Player
     ) -> tuple[Player, ActionType]:
         if self.called_vuile_was.hand.vuile_was:
+            self.give_new_cards(self.called_vuile_was)
+
             for player in self.players_that_looked:
                 player.score += 1
         else:
@@ -436,6 +438,16 @@ class ToepGame:
                 self.next_player_dict[last_player],
                 ActionType.CALL_VUILE_WAS,
             )
+
+    def give_new_cards(self, player: Player):
+        for card in player.hand:
+            self.deck.add_card(card)
+
+        player.hand = PlayerHand()
+
+        for _ in range(CARDS_PER_PLAYER):
+            drawn_card = self.deck.draw_card()
+            player.hand.add_card(drawn_card)
 
     def handle_played_card(
         self, player: Player, card: Card
@@ -495,10 +507,11 @@ class ToepGame:
             self.winning_player = self.alive_players[0]
             return self.end_round(compare=False)
 
-        if self.ended_game:
-            return (
-                self.start_round()
-            )  # NOTE this probably isnt the best solution
+        # NOTE: had this here before, but the round should always finish even if players get to MAX_SCORE
+        # if self.ended_game:
+        #     return (
+        #         self.start_round()
+        #     )  # NOTE this probably isnt the best solution
 
         self.stake += 1
         self.last_player_to_toep = self.active_player

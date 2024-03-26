@@ -1,5 +1,12 @@
 import gymnasium as gym
-from gymnasium.spaces import Dict, Discrete, MultiDiscrete
+from gymnasium.spaces import (
+    Dict,
+    Discrete,
+    MultiDiscrete,
+    Box,
+    flatten,
+    flatten_space,
+)
 import numpy as np
 
 
@@ -19,22 +26,26 @@ class ToepObservationSpace:
 
         # Define subspaces for different elements of the observation
         self.player_hands_space = MultiDiscrete(
-            [highest_number] * self.num_cards_per_player * self.num_players,
+            [highest_number + 1]
+            * self.num_cards_per_player
+            * self.num_players,
             dtype=np.int32,
         )
         self.player_piles_space = MultiDiscrete(
-            [highest_number] * self.num_cards_per_player * self.num_players,
+            [highest_number + 1]
+            * self.num_cards_per_player
+            * self.num_players,
             dtype=np.int32,
         )
         self.player_scores_space = MultiDiscrete(
-            [max_score] * num_players, dtype=np.int32
+            [max_score * 2] * num_players, dtype=np.int32
         )
-        self.turn_number_space = Discrete(num_players)
-        self.sub_round_number_space = Discrete(self.num_cards_per_player)
+        self.turn_number_space = Discrete(num_players + 1)
+        self.sub_round_number_space = Discrete(self.num_cards_per_player + 1)
         self.action_type_space = Discrete(4)
 
         # Combine all subspaces into a dictionary space
-        self.observation_space = Dict(
+        self.observation_space_dict = Dict(
             {
                 "player_hands": self.player_hands_space,
                 "player_piles": self.player_piles_space,
@@ -44,6 +55,9 @@ class ToepObservationSpace:
                 "action_type": self.action_type_space,
             }
         )
+
+        # Create a Box space
+        self.observation_space = flatten_space(self.observation_space_dict)
 
     def empty_space(self):
         # Create empty observation space for player hands and piles
@@ -64,7 +78,7 @@ class ToepObservationSpace:
         sub_round_number_empty = 0
         action_type = 0
 
-        return {
+        dictionary = {
             "player_hands": player_hands_empty,
             "player_piles": player_piles_empty,
             "player_scores": player_scores_empty,
@@ -72,6 +86,9 @@ class ToepObservationSpace:
             "sub_round_number": sub_round_number_empty,
             "action_type": action_type,
         }
+
+        # return flatten(self.observation_space_dict, dictionary)
+        return dictionary
 
     @property
     def shape(self):
