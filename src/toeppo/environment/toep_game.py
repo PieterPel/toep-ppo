@@ -76,7 +76,11 @@ class CardCollection:
         self.cards.append(card)
 
     def remove_card(self, card: Card):
-        self.cards.remove(card)
+        try:
+            self.cards.remove(card)
+        except ValueError:
+            print(f"The player does not have {card}")
+            self.cards.pop()
 
     def clear(self):
         self.cards = []
@@ -404,7 +408,7 @@ class ToepGame:
     ) -> tuple[Player, ActionType]:
         self.logger.info(f"{player} did not call a vuile was")
 
-        if player == self.last_player_dict[self.active_player]:
+        if player == self.dealing_player:
             return self.start_sub_round()
         else:
             return self.next_player_dict[player], ActionType.CALL_VUILE_WAS
@@ -431,11 +435,12 @@ class ToepGame:
             self.called_vuile_was.score += 1
             self.called_vuile_was.play_open = True
 
-        if last_player == self.dealing_player:
+        # The sub round will either start here if the dealer called vuile was or in self.handle_dont_called_vuile_was if the dealer did not
+        if last_player == self.last_player_dict[self.dealing_player]:
             return self.start_sub_round()
         else:
             return (
-                self.next_player_dict[last_player],
+                self.next_player_dict[self.called_vuile_was],
                 ActionType.CALL_VUILE_WAS,
             )
 
