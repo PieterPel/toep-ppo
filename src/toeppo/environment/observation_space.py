@@ -3,6 +3,7 @@ from gymnasium.spaces import (
     Dict,
     Discrete,
     MultiDiscrete,
+    MultiBinary,
     Box,
     flatten,
     flatten_space,
@@ -17,6 +18,7 @@ class ToepObservationSpace:
         num_cards_per_player,
         card_to_number_mapping: dict,
         max_score=15,
+        max_score_multiplier=10,
     ):
         self.num_players = num_players
         self.max_cards_per_pile = num_cards_per_player
@@ -38,7 +40,7 @@ class ToepObservationSpace:
             dtype=np.int32,
         )
         self.player_scores_space = MultiDiscrete(
-            [max_score * 2] * num_players, dtype=np.int32
+            [max_score * max_score_multiplier] * num_players, dtype=np.int32
         )
         self.turn_number_space = Discrete(num_players + 1)
         self.sub_round_number_space = Discrete(self.num_cards_per_player + 1)
@@ -57,7 +59,16 @@ class ToepObservationSpace:
         )
 
         # Create a Box space
-        self.observation_space = flatten_space(self.observation_space_dict)
+        self.observation_space_flattened = flatten_space(
+            self.observation_space_dict
+        )
+
+        self.observation_space = Dict(
+            {
+                "observation": self.observation_space_flattened,
+                "action_mask": MultiBinary(39),
+            }
+        )
 
     def empty_space(self):
         # Create empty observation space for player hands and piles
